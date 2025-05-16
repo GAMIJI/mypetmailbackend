@@ -5,7 +5,7 @@ import User from "../models/User.js";
 // POST: Add a new category
 export const addCategory = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name } = req.query;
 
     if (!name) {
       return res.status(400).json({ error: "Category name is required" });
@@ -39,7 +39,7 @@ export const getCategories = async (req, res) => {
 
 export const getUsersByRole = async (req, res) => {
   try {
-    const { role, search = "", page = 1, limit = 10 } = req.body;
+    const { role, search = "", page = 1, limit = 10 } = req.query;
 
     if (!role) {
       return res.status(400).json({ error: "Role is required" });

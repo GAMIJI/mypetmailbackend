@@ -1,11 +1,19 @@
 import User from "../models/User.js";
 import generateToken from "../utils/generateToken.js";
+import Category from "../models/Category.js";
 import bcrypt from "bcryptjs";
 import generateOtp from "../utils/generateOtp.js";
 import fs from "fs";
 import path from "path";
 import Appointment from "../models/Appointment.js";
 import DocReview from "../models/DocReview.js";
+import Cart from "../models/Cart.js";
+import Order from '../models/Order.js';
+
+
+import Product from "../models/AddProduct.js";
+import AddStore from "../models/AddStore.js";
+
 
 export const registerUser = async (req, res) => {
   const {
@@ -52,18 +60,17 @@ export const registerUser = async (req, res) => {
     const doctorFields =
       role === "doctor"
         ? {
-            education,
-            experience,
-            college,
-            specialization,
-            licenseNumber,
-            clinicAddress,
-            availableDays,
-            timings,
-            consultationFee,
-            documents,
-            gender,
-          }
+          education,
+          experience,
+          college,
+          specialization,
+          licenseNumber,
+          clinicAddress,
+          availableDays,
+          timings,
+          consultationFee,
+          documents,
+        }
         : {};
 
     if (existingUser) {
@@ -421,7 +428,7 @@ export const getFilteredDoctors = async (req, res) => {
       minRating,
     } = req.query;
 
-    
+
     const userId = req?.user?.id;
     let wishlist = [];
 
@@ -514,8 +521,8 @@ export const getDoctorDetails = async (req, res) => {
     const averageRating =
       totalReviews > 0
         ? (
-            reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
-          ).toFixed(1)
+          reviews.reduce((sum, r) => sum + r.rating, 0) / totalReviews
+        ).toFixed(1)
         : 0;
 
     // Return the doctor's details
@@ -706,7 +713,7 @@ export const removeFromWishlist = async (req, res) => {
 
 export const addDoctorReview = async (req, res) => {
   console.log(req.body);
-  
+
   const { rating, review, doctorId } = req.body;
   const userId = req.user?.id;
 
@@ -759,5 +766,414 @@ export const getDoctorReviews = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+
+export const getAllProducts = async (req, res) => {
+  try {
+    const { search = "", page = 1, limit = "6", category, minPrice, maxPrice } = req.query;
+
+    const query = {
+      $or: [
+        { productName: { $regex: search, $options: "i" } },
+        { brand: { $regex: search, $options: "i" } },
+      ]
+    };
+
+    // Category filtering (supports multiple values)
+    if (category && category !== "all") {
+      if (Array.isArray(category)) {
+        query.category = { $in: category };
+      } else {
+        query.category = category;
+      }
+    }
+
+    // Price range filtering
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.$gte = Number(minPrice);
+      if (maxPrice) query.price.$lte = Number(maxPrice);
+    }
+
+    const skip = (Number(page) - 1) * Number(limit);
+
+    const [products, total] = await Promise.all([
+      Product.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Product.countDocuments(query)
+    ]);
+
+    res.status(200).json({
+      products,
+      total,
+      page: Number(page),
+      totalPages: Math.ceil(total / limit),
+    });
+
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    res.status(500).json({ error: "Failed to fetch products" });
+  }
+};
+
+export const getProductById = async (req, res) => {
+  try {
+    const { id } = req.query;
+    console.log(id);
+
+
+    // Validate the ID format
+    // if (!id || id.length !== 24) {
+    //   return res.status(400).json({ error: "Invalid product ID" });
+    // }
+
+    const product = await Product.findById(id);
+
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    res.status(200).json(product);
+  } catch (error) {
+    console.error("Error fetching product by ID:", error);
+    res.status(500).json({ error: "Failed to fetch product" });
+  }
+};
+
+export const addToCart = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { productId, quantity } = req.body;
+
+    if (!userId || !productId || !quantity) {
+      return res.status(400).json({ error: "userId, productId, and quantity are required" });
+    }
+
+    let cart = await Cart.findOne({ userId });
+
+    if (!cart) {
+      // Create a new cart
+      cart = new Cart({
+        userId,
+        items: [{ productId, quantity }],
+      });
+    } else {
+      // Check if the product already exists
+      const itemIndex = cart.items.findIndex(
+        item => item.productId.toString() === productId
+      );
+
+      if (itemIndex > -1) {
+        // Product exists, replace quantity
+        cart.items[itemIndex].quantity = quantity;
+      } else {
+        // Add new product
+        cart.items.push({ productId, quantity });
+      }
+    }
+
+    await cart.save();
+    return res.status(200).json({ message: "Cart updated successfully", cart });
+  } catch (error) {
+    console.error("Error updating cart:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// Get cart with populated product info
+export const getUserCart = async (req, res) => {
+  try {
+    const userId = req.user.id; // Make sure user ID is available via middleware
+
+    const cart = await Cart.findOne({ userId })
+      .populate("items.productId") // populate full product info
+      .exec();
+
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    res.status(200).json(cart);
+  } catch (error) {
+    console.error("Error fetching cart:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+// Remove item from cart
+export const removeFromCart = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { productId } = req.body;
+
+    if (!userId || !productId) {
+      return res.status(400).json({ error: "userId and productId are required" });
+    }
+
+    const cart = await Cart.findOne({ userId });
+
+    if (!cart) {
+      return res.status(404).json({ message: "Cart not found" });
+    }
+
+    // Filter out the item to remove
+    cart.items = cart.items.filter(item => item.productId.toString() !== productId);
+
+    await cart.save();
+
+    return res.status(200).json({ message: "Item removed from cart successfully", cart });
+  } catch (error) {
+    console.error("Error removing item from cart:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// GET: Fetch all categories
+export const getCategories = async (req, res) => {
+  try {
+    const categories = await Category.find().sort({ name: 1 });
+    res.status(200).json({ categories });
+  } catch (err) {
+    console.error("Error fetching categories:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+// place order 
+export const placeOrder = async (req, res) => {
+  try {
+    const { products, address, paymentMode, totalAmount } = req.body;
+
+    const productArray = Array.isArray(products) ? products : [products];
+
+    if (productArray.length === 0) {
+      return res.status(400).json({ message: 'No products provided in the order.' });
+    }
+
+    // Validate and fetch all products
+    const fetchedProducts = await Promise.all(
+      productArray.map(async (item) => {
+        const product = await Product.findById(item.productId);
+        if (!product) {
+          throw new Error(`Product not found with ID: ${item.productId}`);
+        }
+
+        return {
+          product: product._id,
+          quantity: item.quantity,
+          vendor: product.userId,
+        };
+      })
+    );
+
+    // Ensure all products are from the same vendor
+    const vendorIds = [...new Set(fetchedProducts.map(p => p.vendor.toString()))];
+    if (vendorIds.length > 1) {
+      return res.status(400).json({ message: 'All products in a single order must belong to the same vendor.' });
+    }
+
+    // Create and save order
+    const order = new Order({
+      user: req.user.id,
+      vendor: fetchedProducts[0].vendor,
+      products: fetchedProducts.map(({ product, quantity }) => ({ product, quantity })),
+      paymentMode,
+      address,
+      totalAmount,
+    });
+
+
+    await order.save();
+
+    // Populate product details in the response
+    const populatedOrder = await Order.findById(order._id)
+      .populate('products.product') // populate product details
+      .populate('user', 'name email') // optional: populate user
+      .populate('user', 'storeName email'); // optional: populate vendor/store
+
+    res.status(201).json({ message: 'Order placed successfully', order: populatedOrder });
+  } catch (err) {
+    console.error('Error placing order:', err);
+    res.status(500).json({ message: 'Server Error', error: err.message });
+  }
+};
+
+// update order status
+// User confirms or cancels
+export const updateOrderStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    if (!['Completed', 'Cancelled'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    const order = await Order.findById({ _id: req.params.id, user: req.user.id });
+
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    // Restrict user from canceling after dispatch
+    if (status === 'Cancelled' && order.status === 'Dispatched') {
+      return res.status(400).json({ message: 'Cannot cancel order after dispatch' });
+    }
+
+    // User can only mark as Completed if it was Dispatched
+    if (status === 'Completed' && order.status !== 'Dispatched') {
+      return res.status(400).json({ message: 'Cannot complete order before dispatch' });
+    }
+
+    order.status = status;
+    await order.save();
+
+    res.json({ message: `Order ${status.toLowerCase()}` });
+  } catch (err) {
+    res.status(500).json({ message: 'Server Error', err });
+  }
+};
+
+export const getUserOrdersByStatus = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status } = req.query;
+
+    const validStatuses = ['Placed', 'Dispatched', 'Completed', 'Cancelled'];
+    const filter = {
+      user: userId,
+    };
+
+    if (status && validStatuses.includes(status)) {
+      filter.status = status;
+    } else {
+      filter.status = { $in: validStatuses }; // default: all
+    }
+
+    const orders = await Order.find(filter).populate('products.product');
+
+    res.json({ orders });
+  } catch (err) {
+    console.error('Error fetching user orders:', err);
+    res.status(500).json({ message: 'Server Error' });
+  }
+};
+
+export const getAllStores = async (req, res) => {
+  try {
+    const stores = await AddStore.find();
+
+    res.status(200).json({ stores });
+  } catch (error) {
+    console.error("Error fetching all stores:", error);
+    res.status(500).json({ error: "Failed to fetch stores." });
+  }
+};
+
+export const getProductsByStoreId = async (req, res) => {
+  try {
+    const storeId = req.params.storeId;
+
+    if (!storeId) {
+      return res.status(400).json({ error: 'Store ID is required' });
+    }
+
+    const products = await Product.find({ storeId });
+
+    res.status(200).json(products);
+
+  } catch (error) {
+    console.error('Error fetching products:', error);
+    res.status(500).json({ error: 'Failed to fetch products' });
+  }
+};
+import mongoose from 'mongoose';
+
+export const getUserOrderDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid order ID' });
+    }
+
+    const order = await Order.findById(id)
+      .populate('user', 'name email')
+      .populate('products.product');
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    const orderDetails = {
+      orderId: order._id,
+      user: order.user,
+      status: order.status,
+      paymentMode: order.paymentMode,
+      createdAt: order.createdAt,
+      products: order.products.map((item) => ({
+        productId: item.product._id,
+        name: item.product.name,
+        price: item.product.price,
+        quantity: item.quantity,
+        images: item.product.images,
+        description: item.product.description,
+      })),
+    };
+
+    res.status(200).json({ success: true, order: orderDetails });
+
+  } catch (err) {
+    console.error('Error:', err);
+    res.status(500).json({ success: false, message: 'Server Error' });
+  }
+};
+
+
+export const getOrderDetailsById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid order ID' });
+    }
+
+    // Fetch order with user, vendor, and product details populated
+    const order = await Order.findById(id)
+      .populate('user', 'name email phone')
+      .populate('vendor', 'name email phone')
+      .populate('products.product');
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    // Format the order response
+    const orderDetails = {
+      orderId: order._id,
+      status: order.status,
+      paymentMode: order.paymentMode,
+      totalAmount: order.totalAmount,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      user: order.user,
+      vendor: order.vendor,
+      address: order.address,
+      products: order.products.map((item) => ({
+        productId: item.product._id,
+        name: item.product.name,
+        description: item.product.description,
+        price: item.product.price,
+        images: item.product.images,
+        quantity: item.quantity,
+      })),
+    };
+
+    res.status(200).json({ success: true, order: orderDetails });
+  } catch (err) {
+    console.error('Error fetching order:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };

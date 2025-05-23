@@ -29,10 +29,10 @@ app.use("/api/vendor",vendorRoutes)
 app.use("/api/admin",adminRoutes)
 
 
-app.get("/", (req, res) => {
+app.get("/", (req, res) => { 
   res.send("API is running...");
 });
 
 // Start Server
-const PORT = process.env.PORT || 5003;
+const PORT = process.env.PORT || 5008;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

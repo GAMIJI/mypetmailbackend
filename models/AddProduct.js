@@ -23,6 +23,11 @@ const productSchema = new mongoose.Schema(
       ref: 'User',
       required: true
     },
+    storeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AddStore', // Make sure your store model is named "Store"
+      required: true
+    },
     category: {
       type: String,
       required: true,
@@ -32,24 +37,11 @@ const productSchema = new mongoose.Schema(
     },
     productImages: {
       type: [String], // Array of image URLs or file paths
-      //   required: true,
     },
     isFeatured: {
       type: Boolean,
       default: false,
     },
-    // ratings: {
-    //   type: Number,
-    //   default: 0,
-    // },
-    // reviews: [
-    //   {
-    //     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-    //     comment: String,
-    //     rating: Number,
-    //     createdAt: { type: Date, default: Date.now },
-    //   },
-    // ],
   },
   { timestamps: true }
 );
